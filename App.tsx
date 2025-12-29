@@ -6,7 +6,8 @@ import {
 } from 'recharts';
 import { 
   Plus, AlertCircle, Sparkles, 
-  Wallet, Settings2, Activity
+  Wallet, Settings2, Activity,
+  CheckCircle2, Target, Info, BarChart3
 } from 'lucide-react';
 import { BudgetData, ChartDataItem } from './types';
 import { COLORS, INITIAL_DIALS, CATEGORY_ICONS } from './constants';
@@ -14,31 +15,23 @@ import NumberInput from './components/NumberInput';
 import DialControl from './components/DialControl';
 
 const App: React.FC = () => {
-  // --- STATE ---
   const [budget, setBudget] = useState<BudgetData>({
     income: 0,
-    fixed: {
-      rent: 0,
-      utilities: 0,
-      other: 0,
-    },
-    future: {
-      savings: 0,
-      investment: 0,
-    },
+    fixed: { rent: 0, utilities: 0, other: 0 },
+    future: { savings: 0, investment: 0 },
     dials: INITIAL_DIALS,
   });
 
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
 
-  // --- PERSISTENCE ---
   useEffect(() => {
     const saved = localStorage.getItem('money-dials-data');
     if (saved) {
       try {
-        setBudget(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        setBudget(parsed);
       } catch (e) {
-        console.error("No se pudo cargar el presupuesto", e);
+        console.error("Error loading data", e);
       }
     }
   }, []);
@@ -47,39 +40,38 @@ const App: React.FC = () => {
     localStorage.setItem('money-dials-data', JSON.stringify(budget));
   }, [budget]);
 
-  // --- CALCULATIONS ---
   const totals = useMemo(() => {
     const fixed = budget.fixed.rent + budget.fixed.utilities + budget.fixed.other;
     const future = budget.future.savings + budget.future.investment;
     const dials = budget.dials.reduce((acc, d) => acc + d.value, 0);
     const expenses = fixed + future + dials;
     const remaining = budget.income - expenses;
-    return { fixed, future, dials, expenses, remaining };
+    
+    const pctFixed = budget.income > 0 ? (fixed / budget.income) * 100 : 0;
+    const pctSavings = budget.income > 0 ? (budget.future.savings / budget.income) * 100 : 0;
+    const pctInvest = budget.income > 0 ? (budget.future.investment / budget.income) * 100 : 0;
+    const pctDials = budget.income > 0 ? (dials / budget.income) * 100 : 0;
+
+    return { fixed, future, dials, expenses, remaining, pctFixed, pctSavings, pctInvest, pctDials };
   }, [budget]);
 
-  const isOverBudget = totals.remaining < 0;
-
-  // --- HANDLERS ---
   const updateBudget = (path: string, value: number) => {
     const parts = path.split('.');
     if (parts.length === 2) {
       const [category, sub] = parts as [keyof BudgetData, string];
       setBudget(prev => ({
         ...prev,
-        [category]: {
-          ...(prev[category] as object),
-          [sub]: value
-        }
+        [category]: { ...(prev[category] as object), [sub]: value }
       }));
     } else {
       setBudget(prev => ({ ...prev, [path]: value }));
     }
   };
 
-  const updateDial = (id: string, name: string, value: number) => {
+  const updateDial = (id: string, name: string, value: number, description?: string) => {
     setBudget(prev => ({
       ...prev,
-      dials: prev.dials.map(d => d.id === id ? { ...d, name, value } : d)
+      dials: prev.dials.map(d => d.id === id ? { ...d, name, value, description } : d)
     }));
   };
 
@@ -98,7 +90,6 @@ const App: React.FC = () => {
     }));
   };
 
-  // --- CHART DATA ---
   const chartData: ChartDataItem[] = useMemo(() => {
     const data: ChartDataItem[] = [
       { name: 'Arriendo', value: budget.fixed.rent, color: COLORS.fixed.rent },
@@ -112,15 +103,12 @@ const App: React.FC = () => {
         color: COLORS.dials[i % COLORS.dials.length]
       }))
     ];
-
-    if (!isOverBudget) {
-      data.push({ name: 'Restante', value: totals.remaining, color: COLORS.remaining });
+    if (totals.remaining > 0) {
+      data.push({ name: 'Libre', value: totals.remaining, color: COLORS.remaining });
     }
-
     return data.filter(d => d.value > 0);
-  }, [budget, totals, isOverBudget]);
+  }, [budget, totals]);
 
-  // --- RENDER HELPERS ---
   const formatMoney = (amount: number) => {
     return new Intl.NumberFormat('es-CO', { 
       style: 'currency', 
@@ -129,169 +117,120 @@ const App: React.FC = () => {
     }).format(amount);
   };
 
-  const renderActiveShape = (props: any) => {
-    const { cx, cy, midAngle, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
-    
-    const RADIAN = Math.PI / 180;
-    const sin = Math.sin(-RADIAN * midAngle);
-    const cos = Math.cos(-RADIAN * midAngle);
-    const offset = 14; 
-    const tx = offset * cos;
-    const ty = offset * sin;
-    
-    return (
-      <g transform={`translate(${tx}, ${ty})`}>
-        <Sector
-          cx={cx}
-          cy={cy}
-          innerRadius={innerRadius}
-          outerRadius={outerRadius + 12}
-          startAngle={startAngle}
-          endAngle={endAngle}
-          fill={fill}
-          opacity={0.3}
-          cornerRadius={10}
-        />
-        <Sector
-          cx={cx}
-          cy={cy}
-          innerRadius={innerRadius}
-          outerRadius={outerRadius + 6}
-          startAngle={startAngle}
-          endAngle={endAngle}
-          fill={fill}
-          cornerRadius={10}
-          stroke="#0f172a"
-          strokeWidth={3}
-        />
-      </g>
-    );
-  };
+  const healthCheck = [
+    { 
+      label: 'Costos Fijos', 
+      current: totals.pctFixed, 
+      target: '50-60%', 
+      status: totals.pctFixed <= 60 ? 'good' : 'bad' 
+    },
+    { 
+      label: 'Ahorros', 
+      current: totals.pctSavings, 
+      target: '5-10%', 
+      status: totals.pctSavings >= 5 ? 'good' : 'warning' 
+    },
+    { 
+      label: 'Inversiones', 
+      current: totals.pctInvest, 
+      target: '5-10%', 
+      status: totals.pctInvest >= 5 ? 'good' : 'warning' 
+    },
+    { 
+      label: 'Gasto Libre', 
+      current: totals.pctDials, 
+      target: '20-35%', 
+      status: (totals.pctDials >= 20 && totals.pctDials <= 35) ? 'good' : 'neutral' 
+    },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center">
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-20">
       
-      {/* HEADER */}
-      <header className="w-full max-w-7xl px-6 py-8 flex justify-between items-center border-b border-slate-900">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-gradient-to-br from-purple-600 to-indigo-600 rounded-xl shadow-[0_0_20px_rgba(168,85,247,0.3)]">
-            <Settings2 className="text-white" size={24} />
+      {/* HERO HEADER */}
+      <header className="w-full bg-slate-950/50 backdrop-blur-xl border-b border-white/5 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-gradient-to-tr from-purple-600 to-indigo-500 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/20">
+              <Settings2 size={20} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-black tracking-tight leading-none">Perillas del Dinero</h1>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-1">Conscious Spending Framework</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">Perillas del Dinero</h1>
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-widest">PLAN DE GASTO CONSCIENTE</p>
-          </div>
-        </div>
-
-        <div className="hidden md:flex items-center gap-6">
-          <div className="flex flex-col items-end">
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">INGRESO MENSUAL</span>
-            <span className="text-lg font-mono font-bold text-slate-200">{formatMoney(budget.income)}</span>
+          <div className="flex items-center gap-8">
+            <div className="hidden sm:block text-right">
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Saldo Mensual</p>
+              <p className={`text-lg font-mono font-black ${totals.remaining < 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
+                {formatMoney(totals.remaining)}
+              </p>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="w-full max-w-7xl p-6 lg:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16 relative">
+      <main className="max-w-7xl mx-auto p-6 lg:p-12 grid grid-cols-1 lg:grid-cols-12 gap-12">
         
-        {/* LEFT COLUMN: INPUTS */}
-        <div className="lg:col-span-5 space-y-8 animate-in fade-in slide-in-from-left-4 duration-700">
+        {/* LEFT COLUMN: CONTROLS */}
+        <div className="lg:col-span-5 space-y-10">
           
-          {/* INCOME CARD */}
-          <section className="bg-slate-900/40 backdrop-blur-sm p-6 rounded-3xl border border-slate-800/50 space-y-4 shadow-xl">
-             <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <Wallet size={16} className="text-purple-400" /> Ingresos y Básicos
-                </h2>
-                <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 uppercase">Frecuencia: Mensual</span>
-             </div>
-             <NumberInput 
-                label="Ingreso Neto"
+          {/* INCOME SECTION */}
+          <section className="bg-slate-900/40 p-8 rounded-[2.5rem] border border-white/5 space-y-6 shadow-2xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+              <Wallet size={80} />
+            </div>
+            <h2 className="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-2">
+               Base Financiera
+            </h2>
+            <NumberInput 
+                label="Ingreso Neto Mensual"
                 value={budget.income}
                 onChange={(val) => updateBudget('income', val)}
                 colorClass="text-purple-400"
-                prefix="$"
              />
-             <div className="grid grid-cols-2 gap-4 pt-2">
-                <NumberInput 
-                  label="Vivienda" 
-                  value={budget.fixed.rent} 
-                  onChange={(val) => updateBudget('fixed.rent', val)}
-                  icon={CATEGORY_ICONS.rent}
-                  colorClass="text-teal-400"
-                />
-                <NumberInput 
-                  label="Servicios" 
-                  value={budget.fixed.utilities} 
-                  onChange={(val) => updateBudget('fixed.utilities', val)}
-                  icon={CATEGORY_ICONS.utilities}
-                  colorClass="text-blue-400"
-                />
+             <div className="grid grid-cols-2 gap-4">
+                <NumberInput label="Vivienda" value={budget.fixed.rent} onChange={(val) => updateBudget('fixed.rent', val)} icon={CATEGORY_ICONS.rent} />
+                <NumberInput label="Servicios" value={budget.fixed.utilities} onChange={(val) => updateBudget('fixed.utilities', val)} icon={CATEGORY_ICONS.utilities} />
              </div>
-             <NumberInput 
-                label="Otros Fijos" 
-                value={budget.fixed.other} 
-                onChange={(val) => updateBudget('fixed.other', val)}
-                icon={CATEGORY_ICONS.other}
-                colorClass="text-indigo-400"
-              />
+             <NumberInput label="Otros Gastos Fijos" value={budget.fixed.other} onChange={(val) => updateBudget('fixed.other', val)} icon={CATEGORY_ICONS.other} />
           </section>
 
-          {/* FUTURE CARD */}
-          <section className="bg-slate-900/40 backdrop-blur-sm p-6 rounded-3xl border border-slate-800/50 space-y-5 shadow-xl">
-            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <Sparkles size={16} className="text-sky-400" /> Fondo para el Futuro
+          {/* FUTURE SECTION */}
+          <section className="bg-slate-900/40 p-8 rounded-[2.5rem] border border-white/5 space-y-6 shadow-2xl">
+            <h2 className="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-2">
+               Tu Futuro Yo
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <NumberInput 
-                label="Ahorros" 
-                value={budget.future.savings} 
-                onChange={(val) => updateBudget('future.savings', val)}
-                icon={CATEGORY_ICONS.savings}
-                colorClass="text-sky-400"
-              />
-              <NumberInput 
-                label="Inversiones" 
-                value={budget.future.investment} 
-                onChange={(val) => updateBudget('future.investment', val)}
-                icon={CATEGORY_ICONS.investment}
-                colorClass="text-amber-400"
-              />
-            </div>
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80">
-               <div className="flex justify-between items-center text-xs">
-                 <span className="text-slate-500 font-medium">Tasa de Futuro (Ahorro + Inv)</span>
-                 <span className={`font-mono font-bold ${budget.income > 0 && ((totals.future / budget.income) * 100) >= 20 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                    {budget.income > 0 ? ((totals.future / budget.income) * 100).toFixed(1) : '0.0'}%
-                 </span>
-               </div>
+              <NumberInput label="Ahorro" value={budget.future.savings} onChange={(val) => updateBudget('future.savings', val)} icon={CATEGORY_ICONS.savings} colorClass="text-sky-400" />
+              <NumberInput label="Inversión" value={budget.future.investment} onChange={(val) => updateBudget('future.investment', val)} icon={CATEGORY_ICONS.investment} colorClass="text-amber-400" />
             </div>
           </section>
 
           {/* DIALS SECTION */}
-          <section className="space-y-4">
-            <div className="flex justify-between items-end px-1">
+          <section className="space-y-6">
+            <div className="flex justify-between items-center px-2">
               <div className="space-y-1">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Activity size={18} className="text-rose-400" /> Perillas de Estilo de Vida
+                <h2 className="text-xl font-black text-white flex items-center gap-2">
+                   Tus Perillas
                 </h2>
-                <p className="text-xs text-slate-500">Gasta sin culpa en lo que realmente te apasiona.</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold italic">"Gasta en lo que amas sin culpa"</p>
               </div>
               <button 
                 onClick={addDial}
-                className="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-300 transition-all hover:scale-110 active:scale-95 shadow-lg"
-                title="Añadir Perilla"
+                className="w-12 h-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl flex items-center justify-center text-white transition-all hover:scale-110 active:scale-95"
               >
-                <Plus size={18} />
+                <Plus size={20} />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-4">
               {budget.dials.map((dial, index) => (
                 <DialControl 
                   key={dial.id}
                   dial={dial}
                   index={index}
-                  max={Math.max(100, budget.income)}
+                  max={Math.max(1000, budget.income)}
                   color={COLORS.dials[index % COLORS.dials.length]}
                   onUpdate={updateDial}
                   onRemove={removeDial}
@@ -302,132 +241,114 @@ const App: React.FC = () => {
           </section>
         </div>
 
-        {/* RIGHT COLUMN: VISUALIZATION */}
-        <div className="lg:col-span-7 flex flex-col gap-8">
+        {/* RIGHT COLUMN: VISUALS */}
+        <div className="lg:col-span-7 flex flex-col gap-12">
           
-          <div className="sticky top-10 space-y-8">
-            {/* CHART CARD */}
-            <div className="bg-slate-900/40 backdrop-blur-md p-6 lg:p-12 rounded-[3.5rem] border border-slate-800/40 shadow-2xl min-h-[600px] lg:min-h-[700px] flex flex-col items-center justify-center animate-in zoom-in duration-700 relative overflow-hidden">
+          <div className="sticky top-32 space-y-12">
+            
+            {/* RAMIT SETHI BENCHMARKS SECTION */}
+            <div className="bg-slate-900/40 p-8 rounded-[3rem] border border-white/5 space-y-6 shadow-xl">
+              <div className="flex items-center justify-between px-2">
+                <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-2">
+                  <BarChart3 size={14} className="text-purple-400" /> Benchmarks de Ramit Sethi
+                </h2>
+                <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest bg-white/5 px-3 py-1 rounded-full">Rich Life Standards</span>
+              </div>
               
-              {/* Decorative background glow */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[400px] bg-purple-600/10 blur-[120px] -z-10 rounded-full" />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {healthCheck.map((item, i) => (
+                  <div key={i} className="flex flex-col gap-1 p-4 rounded-2xl bg-slate-950/40 border border-white/5 hover:border-white/10 transition-colors">
+                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">{item.label}</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className={`text-2xl font-mono font-black ${item.status === 'good' ? 'text-emerald-400' : item.status === 'warning' ? 'text-amber-400' : 'text-rose-400'}`}>
+                        {item.current.toFixed(0)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-[9px] text-slate-600 font-bold italic">Meta: {item.target}</span>
+                      <div className={`w-1.5 h-1.5 rounded-full ${item.status === 'good' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : item.status === 'warning' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]'}`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-              <div className="relative w-full aspect-square max-w-[550px]">
+            {/* MAIN CHART */}
+            <div className="bg-slate-900/40 p-8 lg:p-16 rounded-[4rem] border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center relative overflow-hidden group">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/10 blur-[150px] -z-10 rounded-full group-hover:bg-indigo-500/15 transition-all duration-700" />
+              
+              <div className="relative w-full aspect-square max-w-[500px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart onMouseLeave={() => setActiveIndex(undefined)}>
                     <Pie
                       data={chartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={160} 
-                      outerRadius={210}
-                      paddingAngle={4}
+                      cx="50%" cy="50%"
+                      innerRadius={150} outerRadius={200}
+                      paddingAngle={3}
                       dataKey="value"
                       stroke="none"
                       // @ts-ignore
                       activeIndex={activeIndex}
-                      activeShape={renderActiveShape}
-                      onMouseEnter={(_, index) => setActiveIndex(index)}
-                      onMouseLeave={() => setActiveIndex(undefined)}
-                      animationBegin={0}
-                      animationDuration={1500}
-                      animationEasing="ease-out"
-                    >
-                      {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          const data = payload[0].payload as ChartDataItem;
-                          return (
-                            <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 p-4 rounded-2xl shadow-2xl ring-1 ring-white/10">
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">{data.name}</p>
-                              <p className="text-xl font-mono font-black text-white">{formatMoney(data.value)}</p>
-                              <p className="text-[10px] text-slate-400 font-bold mt-1 bg-slate-800/50 inline-block px-1.5 py-0.5 rounded">
-                                {budget.income > 0 ? ((data.value / budget.income) * 100).toFixed(1) : '0.0'}% del ingreso
-                              </p>
-                            </div>
-                          );
-                        }
-                        return null;
+                      activeShape={(props: any) => {
+                        const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
+                        return (
+                          <g>
+                            <Sector cx={cx} cy={cy} innerRadius={innerRadius} outerRadius={outerRadius + 12} startAngle={startAngle} endAngle={endAngle} fill={fill} cornerRadius={12} opacity={0.4} />
+                            <Sector cx={cx} cy={cy} innerRadius={innerRadius} outerRadius={outerRadius + 6} startAngle={startAngle} endAngle={endAngle} fill={fill} cornerRadius={12} stroke="#0f172a" strokeWidth={3} />
+                          </g>
+                        );
                       }}
-                    />
+                      onMouseEnter={(_, index) => setActiveIndex(index)}
+                      animationDuration={1200}
+                    >
+                      {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip content={() => null} />
                   </PieChart>
                 </ResponsiveContainer>
 
-                {/* CENTRAL STATS */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none select-none">
-                  <p className="text-slate-500 text-[10px] md:text-xs uppercase tracking-[0.5em] font-black mb-1.5">
-                    {isOverBudget ? 'Déficit' : 'Saldo Libre'}
-                  </p>
-                  <p className={`text-2xl md:text-4xl font-mono font-black tracking-tighter transition-all duration-500 ${isOverBudget ? 'text-rose-500' : 'text-white'}`}>
-                    {formatMoney(Math.abs(totals.remaining))}
-                  </p>
-                  <div className="flex items-center gap-1 mt-3">
-                    <span className={`text-[10px] md:text-xs font-black px-4 py-1.5 rounded-full uppercase tracking-widest border transition-colors duration-500 ${isOverBudget ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
-                       {budget.income > 0 ? ((Math.abs(totals.remaining) / budget.income) * 100).toFixed(1) : '0.0'}% {isOverBudget ? 'Excedido' : 'Disponible'}
-                    </span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                  <span className="text-slate-600 text-[10px] font-black uppercase tracking-[0.4em] mb-2">Presupuesto Gastado</span>
+                  <span className={`text-4xl md:text-5xl font-mono font-black tracking-tighter ${totals.remaining < 0 ? 'text-rose-500' : 'text-white'}`}>
+                    {((totals.expenses / (budget.income || 1)) * 100).toFixed(0)}%
+                  </span>
+                  <div className={`mt-4 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${totals.remaining < 0 ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
+                    {totals.remaining < 0 ? 'Sobre el Límite' : 'Flujo Positivo'}
                   </div>
                 </div>
               </div>
 
-              {/* LEGEND GRID */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full mt-14 border-t border-slate-800/30 pt-10">
-                <div className="flex flex-col gap-2 items-center md:items-start group">
-                   <span className="text-[11px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2 group-hover:text-teal-400 transition-colors">
-                     <div className="w-2.5 h-2.5 rounded-full bg-teal-400 shadow-[0_0_10px_rgba(45,212,191,0.5)]" /> Fijos
-                   </span>
-                   <span className="text-lg font-mono font-black text-slate-200">{formatMoney(totals.fixed)}</span>
-                </div>
-                <div className="flex flex-col gap-2 items-center md:items-start group">
-                   <span className="text-[11px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2 group-hover:text-sky-400 transition-colors">
-                     <div className="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.5)]" /> Futuro
-                   </span>
-                   <span className="text-lg font-mono font-black text-slate-200">{formatMoney(totals.future)}</span>
-                </div>
-                <div className="flex flex-col gap-2 items-center md:items-start group">
-                   <span className="text-[11px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2 group-hover:text-rose-400 transition-colors">
-                     <div className="w-2.5 h-2.5 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)]" /> Perillas
-                   </span>
-                   <span className="text-lg font-mono font-black text-slate-200">{formatMoney(totals.dials)}</span>
-                </div>
-                <div className="flex flex-col gap-2 items-center md:items-start group">
-                   <span className="text-[11px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2 group-hover:text-white transition-colors">
-                     <div className="w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.3)]" /> Total
-                   </span>
-                   <span className="text-lg font-mono font-black text-slate-200">{formatMoney(totals.expenses)}</span>
-                </div>
+              {/* DETAILED STATS */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full mt-12 pt-12 border-t border-white/5">
+                {[
+                  { label: 'Fijos', value: totals.fixed, color: 'text-teal-400' },
+                  { label: 'Futuro', value: totals.future, color: 'text-sky-400' },
+                  { label: 'Gusto', value: totals.dials, color: 'text-rose-400' },
+                  { label: 'Restante', value: Math.max(0, totals.remaining), color: 'text-slate-400' },
+                ].map((stat, i) => (
+                  <div key={i} className="flex flex-col items-center md:items-start group/stat">
+                    <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 group-hover/stat:text-white transition-colors">{stat.label}</span>
+                    <span className={`text-base font-mono font-black ${stat.color}`}>{formatMoney(stat.value)}</span>
+                  </div>
+                ))}
               </div>
-
-              {isOverBudget && (
-                <div className="mt-12 flex items-center gap-3 text-rose-400 bg-rose-500/5 px-8 py-5 rounded-[2.5rem] border border-rose-500/20 w-full justify-center backdrop-blur-sm animate-pulse shadow-lg">
-                  <AlertCircle size={24} />
-                  <span className="text-base font-black uppercase tracking-tight">Sobregirado por {formatMoney(Math.abs(totals.remaining))}</span>
-                </div>
-              )}
             </div>
+
           </div>
-
         </div>
-
       </main>
 
-      {/* FOOTER */}
-      <footer className="w-full max-w-7xl px-6 py-20 mt-20 border-t border-slate-900 flex flex-col items-center gap-8">
-        <div className="flex items-center gap-4">
-           <div className="h-px w-12 bg-slate-800" />
-           <p className="text-slate-600 text-[11px] uppercase tracking-[0.6em] font-black text-center">MARCO DE GASTO CONSCIENTE</p>
-           <div className="h-px w-12 bg-slate-800" />
+      <footer className="max-w-7xl mx-auto px-6 pt-20 flex flex-col items-center gap-8 opacity-40">
+        <div className="flex items-center gap-6">
+           <div className="h-px w-10 bg-slate-800" />
+           <p className="text-[10px] font-black uppercase tracking-[0.5em]">Money Dials System</p>
+           <div className="h-px w-10 bg-slate-800" />
         </div>
-        <p className="text-slate-500 text-sm max-w-xl text-center leading-relaxed font-medium italic opacity-70">
-          "Gasta extravagantemente en las cosas que amas y recorta costos sin piedad en las cosas que no. La riqueza no se trata de ahorrar en café; se trata de asignar capital a tus valores."
-        </p>
-        <div className="flex gap-6 mt-2">
-           <div className="w-2 h-2 rounded-full bg-teal-500/40" />
-           <div className="w-2 h-2 rounded-full bg-sky-500/40" />
-           <div className="w-2 h-2 rounded-full bg-rose-500/40" />
+        <div className="flex gap-4">
+           <Info size={14} className="text-slate-600" />
+           <p className="text-[10px] text-slate-500 text-center max-w-sm font-bold uppercase tracking-tighter">
+             Los datos se guardan localmente en tu navegador. 
+           </p>
         </div>
       </footer>
     </div>

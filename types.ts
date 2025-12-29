@@ -3,6 +3,7 @@ export interface Dial {
   id: string;
   name: string;
   value: number;
+  description?: string;
 }
 
 export interface BudgetData {
@@ -23,6 +24,5 @@ export interface ChartDataItem {
   name: string;
   value: number;
   color: string;
-  // Added index signature to resolve TS error with Recharts data mapping
   [key: string]: any;
 }
